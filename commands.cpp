@@ -105,11 +105,12 @@ static std::vector<int> make_version (int a, int b, int c)
 	return version;
 }
 
-static void git_config (const std::string& name, const std::string& value)
+static void git_config (const std::string& name, const std::string& value, bool from_worktree=true)
 {
 	std::vector<std::string>	command;
 	command.push_back("git");
 	command.push_back("config");
+	if (from_worktree) command.push_back("--worktree");
 	command.push_back(name);
 	command.push_back(value);
 
@@ -118,11 +119,12 @@ static void git_config (const std::string& name, const std::string& value)
 	}
 }
 
-static bool git_has_config (const std::string& name)
+static bool git_has_config (const std::string& name, bool from_worktree=true)
 {
 	std::vector<std::string>	command;
 	command.push_back("git");
 	command.push_back("config");
+	if (from_worktree) command.push_back("--worktree");
 	command.push_back("--get-all");
 	command.push_back(name);
 
@@ -134,11 +136,12 @@ static bool git_has_config (const std::string& name)
 	}
 }
 
-static void git_deconfig (const std::string& name)
+static void git_deconfig (const std::string& name, bool from_worktree=true)
 {
 	std::vector<std::string>	command;
 	command.push_back("git");
 	command.push_back("config");
+	if (from_worktree) command.push_back("--worktree");
 	command.push_back("--remove-section");
 	command.push_back(name);
 
@@ -255,12 +258,13 @@ static std::string get_internal_key_path (const char* key_name)
 	return path;
 }
 
-std::string get_git_config (const std::string& name)
+std::string get_git_config (const std::string& name, bool from_worktree)
 {
 	// git config --get
 	std::vector<std::string>	command;
 	command.push_back("git");
 	command.push_back("config");
+	if (from_worktree) command.push_back("--worktree");
 	command.push_back("--get");
 	command.push_back(name);
 
@@ -299,7 +303,7 @@ static std::string get_repo_state_path ()
 	}
 
 	// Check if the repo state dir has been explicitly configured. If so, use that in path construction.
-	if (git_has_config("git-crypt.repoStateDir")) {
+	if (git_has_config("git-crypt.repoStateDir", false)) {
 		std::string		repoStateDir = get_git_config("git-crypt.repoStateDir");
 
 		// The repoStateDir value must always be relative to git work tree to ensure the repoStateDir can be committed
