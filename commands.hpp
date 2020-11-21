@@ -43,7 +43,7 @@ struct Error {
 // Plumbing commands:
 int clean (int argc, const char** argv);
 int smudge (int argc, const char** argv);
-int diff (int argc, const char** argv);
+int textconv (int argc, const char** argv);
 // Public commands:
 int init (int argc, const char** argv);
 int unlock (int argc, const char** argv);

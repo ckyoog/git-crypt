@@ -72,7 +72,7 @@ static void print_usage (std::ostream& out)
 	out << "Plumbing commands (not to be used directly):" << std::endl;
 	out << "   clean [LEGACY-KEYFILE]" << std::endl;
 	out << "   smudge [LEGACY-KEYFILE]" << std::endl;
-	out << "   diff [LEGACY-KEYFILE] FILE" << std::endl;
+	out << "   textconv [LEGACY-KEYFILE] FILE" << std::endl;
 	*/
 	out << std::endl;
 	out << "See 'git-crypt help COMMAND' for more information on a specific command." << std::endl;
@@ -228,8 +228,11 @@ try {
 		if (std::strcmp(command, "smudge") == 0) {
 			return smudge(argc, argv);
 		}
-		if (std::strcmp(command, "diff") == 0) {
-			return diff(argc, argv);
+		if (std::strcmp(command, "diff") == 0) {	// keep "diff" for back compatibility
+			return textconv(argc, argv);
+		}
+		if (std::strcmp(command, "textconv") == 0) {
+			return textconv(argc, argv);
 		}
 	} catch (const Option_error& e) {
 		std::clog << "git-crypt: Error: " << e.option_name << ": " << e.message << std::endl;

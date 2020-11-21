@@ -162,12 +162,12 @@ static void configure_git_filters (const char* key_name)
 		           escaped_git_crypt_path + " clean --key-name=" + key_name);
 		git_config(std::string("filter.git-crypt-") + key_name + ".required", "true");
 		git_config(std::string("diff.git-crypt-") + key_name + ".textconv",
-		           escaped_git_crypt_path + " diff --key-name=" + key_name);
+		           escaped_git_crypt_path + " textconv --key-name=" + key_name);
 	} else {
 		git_config("filter.git-crypt.smudge", escaped_git_crypt_path + " smudge");
 		git_config("filter.git-crypt.clean", escaped_git_crypt_path + " clean");
 		git_config("filter.git-crypt.required", "true");
-		git_config("diff.git-crypt.textconv", escaped_git_crypt_path + " diff");
+		git_config("diff.git-crypt.textconv", escaped_git_crypt_path + " textconv");
 	}
 }
 
@@ -885,7 +885,7 @@ int smudge (int argc, const char** argv)
 	return decrypt_file_to_stdout(key_file, header, std::cin);
 }
 
-int diff (int argc, const char** argv)
+int textconv (int argc, const char** argv)
 {
 	const char*		key_name = 0;
 	const char*		key_path = 0;
@@ -899,7 +899,7 @@ int diff (int argc, const char** argv)
 		legacy_key_path = argv[argi];
 		filename = argv[argi + 1];
 	} else {
-		std::clog << "Usage: git-crypt diff [--key-name=NAME] [--key-file=PATH] FILENAME" << std::endl;
+		std::clog << "Usage: git-crypt textconv [--key-name=NAME] [--key-file=PATH] FILENAME" << std::endl;
 		return 2;
 	}
 	Key_file		key_file;
