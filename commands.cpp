@@ -890,7 +890,8 @@ int textconv (int argc, const char** argv)
 	const char*		key_name = 0;
 	const char*		key_path = 0;
 	const char*		filename = 0;
-	const char*		legacy_key_path = 0;
+	//const char*		legacy_key_path __attribute__((unused)) = 0;
+	const char*		legacy_key_path = 0;	(void)legacy_key_path;
 
 	int			argi = parse_plumbing_options(&key_name, &key_path, argc, argv);
 	if (argc - argi == 1) {
@@ -902,8 +903,6 @@ int textconv (int argc, const char** argv)
 		std::clog << "Usage: git-crypt textconv [--key-name=NAME] [--key-file=PATH] FILENAME" << std::endl;
 		return 2;
 	}
-	Key_file		key_file;
-	load_key(key_file, key_name, key_path, legacy_key_path);
 
 	// Open the file
 	std::ifstream		in(filename, std::fstream::binary);
@@ -912,6 +911,9 @@ int textconv (int argc, const char** argv)
 		return 1;
 	}
 	in.exceptions(std::fstream::badbit);
+/*
+	Key_file		key_file;
+	load_key(key_file, key_name, key_path, legacy_key_path);
 
 	// Read the header to get the nonce and determine if it's actually encrypted
 	unsigned char		header[10 + Aes_ctr_decryptor::NONCE_LEN];
@@ -925,6 +927,61 @@ int textconv (int argc, const char** argv)
 
 	// Go ahead and decrypt it
 	return decrypt_file_to_stdout(key_file, header, in);
+*/
+	// Should not perform decrypt when doing "textconv", because "smudge"
+	// which performs decrypt will always be done prior to "textconv".
+	//
+	// If "textconv" also performs decrypt, file will be decrypted twice in
+	// total. The first time is when doing "git checkout", the second is
+	// when doing "git diff". Of course the second one can be avoided as
+	// long as "textconv" stops decrypt file when it finds the file is not
+	// encrypted (which is exactly what the previous implementation of
+	// "textconv" did). But it could be still a problem in some edge cases.
+	// Here is one. The problem can be reproduced through the following
+	// commands,
+	// 	git crypt unlock  # let's say <file> is decrypted
+	// 	cat <file> | git crypt clean > <newfile>  # <newfile> is encrypted
+	// 	mv <newfile> <file>  # <file> turns to encrypted state again
+	// The mtime, size, content of <file>, all of them have changed since
+	// this moment, which means, to git, <file> is modified. It can be
+	// proven by running "git status", which shows <file> as modified. But,
+	// run "git diff", there is nothing, no difference at all shown for
+	// <file>. What a confusing result! You know <file> is modified, but
+	// you can't find what is changed. Even worse, if you check in <file>,
+	// the blob of <file> stored in the repo would become a double
+	// encrypted thing and you couldn't even notice that. Next time when
+	// some other guy or yourself "git crypt unlock" the repo, the <file>
+	// will remain encrypted, which will drive you guys crazy because it is
+	// so hard to figure out what is going on.
+	//
+	// The above example shows that the issue will be occurring if files
+	// get encrypted again after "git crypt unlock". Of course, in reality,
+	// no one runs the three commands above. But "files get encrypted again
+	// after 'git crypt unlock'" does happen in some edge cases. E.g.,
+	// branch A adds some files which need to be encrypted, so it changes
+	// the file ".gitattributes". Branch changes .gitattributes as well.
+	// Let's say you are working on branch B, and the repo is unlocked, you
+	// merge A to B. Now if you check the files added by branch A, you will
+	// find they are in encrypted state, i.e., they are not smudged when
+	// checkout.
+	//
+	// Apparently, when merging branches, files added in one branch won't
+	// be smudged as long as .gitattributes is getting merged as well, and
+	// it doesn't matter .gitattributes has conflict or not. You might say
+	// this is a bug of git itself, but git-crypt can do better to get
+	// immune to the "bug".
+	// 1. Do not do decrypt in "textconv", which is naturally unnecessary,
+	//    because decrypt is already done in "smudge"
+	// 2. Do not do encrypt in "clean" if the file is already encrypted.
+	//    This one is actually what git asks for. In git docs (git help
+	//    attributes), there is such a statement for this,
+	//      > For best results, clean should not alter its output further
+	//      > if it is run twice ("clean->clean" should be equivalent to
+	//      > "clean")
+	//    This can be done either by output the encrypted file whithout
+	//    change silently, or exit with error immediately.
+	std::cout << in.rdbuf();
+	return 0;
 }
 
 void help_init (std::ostream& out)
