@@ -728,9 +728,22 @@ int clean (int argc, const char** argv)
 
 	char			buffer[1024];
 
-	while (std::cin && file_size < Aes_ctr_encryptor::MAX_CRYPT_BYTES) {
-		std::cin.read(buffer, sizeof(buffer));
+	// Read the header to get the nonce and check if it's actually encrypted
+	int			header_size = 10 + Aes_ctr_decryptor::NONCE_LEN;
+	std::cin.read(buffer, header_size);
+	if (std::cin.gcount() == header_size && std::memcmp(buffer, "\0GITCRYPT\0", 10) == 0) {
+		// File already encrypted - just copy it out to stdout
+		//std::clog << "git-crypt: Warning: file already encrypted" << std::endl;
+		//std::clog << "git-crypt: It may be because of the change of .gitattributes. Check it." << std::endl;
+		//std::cout.write(reinterpret_cast<char*>(header), std::cin.gcount()); // include the bytes which we already read
+		//std::cout << std::cin.rdbuf();
+		//return 0;
+		std::clog << "git-crypt: Error: file already encrypted" << std::endl;
+		return 1;
+	}
 
+	// Read the rest
+	do {
 		const size_t	bytes_read = std::cin.gcount();
 
 		hmac.add(reinterpret_cast<unsigned char*>(buffer), bytes_read);
@@ -744,7 +757,9 @@ int clean (int argc, const char** argv)
 			}
 			temp_file.write(buffer, bytes_read);
 		}
-	}
+	} while (std::cin && file_size < Aes_ctr_encryptor::MAX_CRYPT_BYTES &&
+			(std::cin.read(buffer, sizeof(buffer)), true)
+		);
 
 	// Make sure the file isn't so large we'll overflow the counter value (which would doom security)
 	if (file_size >= Aes_ctr_encryptor::MAX_CRYPT_BYTES) {
