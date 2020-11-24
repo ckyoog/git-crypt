@@ -1250,15 +1250,6 @@ int lock (int argc, const char** argv)
 	} else {
 		// just handle the given key
 		std::string	internal_key_path(get_internal_key_path(key_name));
-		if (access(internal_key_path.c_str(), F_OK) == -1 && errno == ENOENT) {
-			std::clog << "Error: this repository is already locked";
-			if (key_name) {
-				std::clog << " with key '" << key_name << "'";
-			}
-			std::clog << "." << std::endl;
-			return 1;
-		}
-
 		remove_file(internal_key_path);
 		deconfigure_git_filters(key_name);
 		get_encrypted_files(encrypted_files, key_name);
