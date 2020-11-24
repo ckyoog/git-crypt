@@ -1371,9 +1371,9 @@ int add_gpg_user (int argc, const char** argv)
 
 		// git commit ...
 		if (!no_commit) {
-			// TODO: include key_name in commit message
 			std::ostringstream	commit_message_builder;
-			commit_message_builder << "Add " << collab_keys.size() << " git-crypt collaborator" << (collab_keys.size() != 1 ? "s" : "") << "\n\nNew collaborators:\n\n";
+			std::string		plural = collab_keys.size() > 1 ? "s" : "";
+			commit_message_builder << "Add " << collab_keys.size() << " git-crypt collaborator" << plural << (key_name ? std::string(" for key ") + key_name : "") << "\n\nNew collaborator" << plural << ":\n\n";
 			for (std::vector<std::pair<std::string, bool> >::const_iterator collab(collab_keys.begin()); collab != collab_keys.end(); ++collab) {
 				commit_message_builder << '\t' << gpg_shorten_fingerprint(collab->first) << ' ' << gpg_get_uid(collab->first) << '\n';
 			}
