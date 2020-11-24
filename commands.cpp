@@ -327,6 +327,25 @@ static std::string get_repo_keys_path ()
 	return get_repo_keys_path(get_repo_state_path());
 }
 
+static bool check_if_key_exists_in_repo (const char *key_name)
+{
+	std::vector<std::string>	command;
+	command.push_back("git");
+	command.push_back("ls-files");
+	command.push_back(get_repo_keys_path() + "/" + (key_name ? key_name : "default"));
+
+	std::stringstream		output;
+
+	if (!successful_exit(exec_command(command, output))) {
+		throw Error("'git ls-files' failed - is this a Git repository?");
+	}
+
+	if (output.peek() == -1) {
+		return false;
+	}
+	return true;
+}
+
 static std::string get_path_to_top ()
 {
 	// git rev-parse --show-cdup
@@ -1031,6 +1050,11 @@ int init (int argc, const char** argv)
 
 	if (key_name) {
 		validate_key_name_or_throw(key_name);
+	}
+
+	if (check_if_key_exists_in_repo(key_name)) {
+		std::clog << "Error: the key" << (key_name ? std::string(" [") + key_name + "]" : "") << " which is being initialized does exist in the repo already." << std::endl;
+		return 1;
 	}
 
 	std::string		internal_key_path(get_internal_key_path(key_name));
