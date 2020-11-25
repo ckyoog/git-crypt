@@ -1098,6 +1098,9 @@ int unlock (int argc, const char** argv)
 
 	// Running 'git status' also serves as a check that the Git repo is accessible.
 
+	Options_list	options;
+	int		argi = parse_options(options, argc, argv);
+
 	std::stringstream	status_output;
 	get_git_status(status_output);
 	if (status_output.peek() != -1) {
@@ -1108,11 +1111,11 @@ int unlock (int argc, const char** argv)
 
 	// 2. Load the key(s)
 	std::vector<Key_file>	key_files;
-	if (argc > 0) {
+	if (argc - argi > 0) {
 		// Read from the symmetric key file(s)
 
-		for (int argi = 0; argi < argc; ++argi) {
-			const char*	symmetric_key_file = argv[argi];
+		for (int i = argi; i < argc; ++i) {
+			const char*	symmetric_key_file = argv[i];
 			Key_file	key_file;
 
 			try {
