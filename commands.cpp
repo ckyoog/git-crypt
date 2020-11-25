@@ -714,57 +714,44 @@ static int parse_plumbing_options (const char** key_name, const char** key_file,
 	return parse_options(options, argc, argv);
 }
 
-// Encrypt contents of stdin and write to stdout
-int clean (int argc, const char** argv)
+static int encrypt_stream (std::istream &in, std::ostream &out,
+		const char *key_name, const char *key_path, const char *legacy_key_path,
+		bool *encrypted=NULL)
 {
-	const char*		key_name = 0;
-	const char*		key_path = 0;
-	const char*		legacy_key_path = 0;
+	char			buffer[1024];
 
-	int			argi = parse_plumbing_options(&key_name, &key_path, argc, argv);
-	if (argc - argi == 0) {
-	} else if (!key_name && !key_path && argc - argi == 1) { // Deprecated - for compatibility with pre-0.4
-		legacy_key_path = argv[argi];
-	} else {
-		std::clog << "Usage: git-crypt clean [--key-name=NAME] [--key-file=PATH]" << std::endl;
-		return 2;
+	// Read the header of the input to get the nonce and check if it's already encrypted
+	int header_size = 10 + Aes_ctr_decryptor::NONCE_LEN;
+	in.read(buffer, header_size);
+	bool not_encrypted = in.gcount() != header_size || std::memcmp(buffer, "\0GITCRYPT\0", 10) != 0;
+	if (encrypted)
+		*encrypted = !not_encrypted;
+	if (!not_encrypted) {
+		// File already encrypted - just copy it out to stdout
+		out.write(reinterpret_cast<char*>(buffer), in.gcount()); // include the bytes which we already read
+		out << in.rdbuf();
+		return 0;
 	}
+
+	// Load the key
 	Key_file		key_file;
 	load_key(key_file, key_name, key_path, legacy_key_path);
 
 	const Key_file::Entry*	key = key_file.get_latest();
 	if (!key) {
-		std::clog << "git-crypt: error: key file is empty" << std::endl;
+		std::clog << "git-crypt: error: key is empty" << std::endl;
 		return 1;
 	}
 
-	// Read the entire file
-
+	// Read the rest of the input to encrypt
 	Hmac_sha1_state	hmac(key->hmac_key, HMAC_KEY_LEN); // Calculate the file's SHA1 HMAC as we go
 	uint64_t		file_size = 0;	// Keep track of the length, make sure it doesn't get too big
 	std::string		file_contents;	// First 8MB or so of the file go here
 	temp_fstream		temp_file;	// The rest of the file spills into a temporary file on disk
 	temp_file.exceptions(std::fstream::badbit);
 
-	char			buffer[1024];
-
-	// Read the header to get the nonce and check if it's actually encrypted
-	int			header_size = 10 + Aes_ctr_decryptor::NONCE_LEN;
-	std::cin.read(buffer, header_size);
-	if (std::cin.gcount() == header_size && std::memcmp(buffer, "\0GITCRYPT\0", 10) == 0) {
-		// File already encrypted - just copy it out to stdout
-		//std::clog << "git-crypt: Warning: file already encrypted" << std::endl;
-		//std::clog << "git-crypt: It may be because of the change of .gitattributes. Check it." << std::endl;
-		//std::cout.write(reinterpret_cast<char*>(header), std::cin.gcount()); // include the bytes which we already read
-		//std::cout << std::cin.rdbuf();
-		//return 0;
-		std::clog << "git-crypt: Error: file already encrypted" << std::endl;
-		return 1;
-	}
-
-	// Read the rest
 	do {
-		const size_t	bytes_read = std::cin.gcount();
+		const size_t	bytes_read = in.gcount();
 
 		hmac.add(reinterpret_cast<unsigned char*>(buffer), bytes_read);
 		file_size += bytes_read;
@@ -777,8 +764,8 @@ int clean (int argc, const char** argv)
 			}
 			temp_file.write(buffer, bytes_read);
 		}
-	} while (std::cin && file_size < Aes_ctr_encryptor::MAX_CRYPT_BYTES &&
-			(std::cin.read(buffer, sizeof(buffer)), true)
+	} while (in && file_size < Aes_ctr_encryptor::MAX_CRYPT_BYTES &&
+			(in.read(buffer, sizeof(buffer)), true)
 		);
 
 	// Make sure the file isn't so large we'll overflow the counter value (which would doom security)
@@ -814,8 +801,8 @@ int clean (int argc, const char** argv)
 	hmac.get(digest);
 
 	// Write a header that...
-	std::cout.write("\0GITCRYPT\0", 10); // ...identifies this as an encrypted file
-	std::cout.write(reinterpret_cast<char*>(digest), Aes_ctr_encryptor::NONCE_LEN); // ...includes the nonce
+	out.write("\0GITCRYPT\0", 10); // ...identifies this as an encrypted ile
+	out.write(reinterpret_cast<char*>(digest), Aes_ctr_encryptor::NONCE_LEN); // ...includes the nonce
 
 	// Now encrypt the file and write to stdout
 	Aes_ctr_encryptor	aes(key->aes_key, digest);
@@ -826,7 +813,7 @@ int clean (int argc, const char** argv)
 	while (file_data_len > 0) {
 		const size_t	buffer_len = std::min(sizeof(buffer), file_data_len);
 		aes.process(file_data, reinterpret_cast<unsigned char*>(buffer), buffer_len);
-		std::cout.write(buffer, buffer_len);
+		out.write(buffer, buffer_len);
 		file_data += buffer_len;
 		file_data_len -= buffer_len;
 	}
@@ -842,14 +829,41 @@ int clean (int argc, const char** argv)
 			aes.process(reinterpret_cast<unsigned char*>(buffer),
 			            reinterpret_cast<unsigned char*>(buffer),
 			            buffer_len);
-			std::cout.write(buffer, buffer_len);
+			out.write(buffer, buffer_len);
 		}
 	}
 
 	return 0;
 }
 
-static int decrypt_file_to_stdout (const Key_file& key_file, const unsigned char* header, std::istream& in)
+// Encrypt contents of stdin and write to stdout
+int clean (int argc, const char** argv)
+{
+	const char*		key_name = 0;
+	const char*		key_path = 0;
+	const char*		legacy_key_path = 0;
+
+	int			argi = parse_plumbing_options(&key_name, &key_path, argc, argv);
+	if (argc - argi == 0) {
+	} else if (!key_name && !key_path && argc - argi == 1) { // Deprecated - for compatibility with pre-0.4
+		legacy_key_path = argv[argi];
+	} else {
+		std::clog << "Usage: git-crypt clean [--key-name=NAME] [--key-file=PATH]" << std::endl;
+		return 2;
+	}
+
+	bool encrypted;
+	int retval = encrypt_stream(std::cin, std::cout, key_name, key_path, legacy_key_path, &encrypted);
+	if (encrypted) {
+		// File already encrypted, return error
+		std::clog << "git-crypt: Error: file in worktree still encrypted" << std::endl;
+		return 1;
+	}
+	return retval;
+}
+
+static int decrypt_stream (const Key_file& key_file, const unsigned char* header,
+		std::istream& in, std::ostream &out)
 {
 	const unsigned char*	nonce = header + 10;
 	uint32_t		key_version = 0; // TODO: get the version from the file header
@@ -867,7 +881,7 @@ static int decrypt_file_to_stdout (const Key_file& key_file, const unsigned char
 		in.read(reinterpret_cast<char*>(buffer), sizeof(buffer));
 		aes.process(buffer, buffer, in.gcount());
 		hmac.add(buffer, in.gcount());
-		std::cout.write(reinterpret_cast<char*>(buffer), in.gcount());
+		out.write(reinterpret_cast<char*>(buffer), in.gcount());
 	}
 
 	unsigned char		digest[Hmac_sha1_state::LEN];
@@ -881,6 +895,28 @@ static int decrypt_file_to_stdout (const Key_file& key_file, const unsigned char
 	}
 
 	return 0;
+}
+
+static int decrypt_stream (std::istream &in, std::ostream &out,
+		const char *key_name, const char *key_path, const char *legacy_key_path,
+		bool *encrypted=NULL)
+{
+	Key_file		key_file;
+	load_key(key_file, key_name, key_path, legacy_key_path);
+
+	// Read the header to get the nonce and make sure it's actually encrypted
+	unsigned char		header[10 + Aes_ctr_decryptor::NONCE_LEN];
+	in.read(reinterpret_cast<char*>(header), sizeof(header));
+	bool not_encrypted = in.gcount() != sizeof(header) || std::memcmp(header, "\0GITCRYPT\0", 10) != 0;
+	if (encrypted)
+		*encrypted = !not_encrypted;
+	if (not_encrypted) {
+		// File not encrypted - just copy it out to out
+		out.write(reinterpret_cast<char*>(header), in.gcount()); // include the bytes which we already read
+		out << in.rdbuf();
+		return 0;
+	}
+	return decrypt_stream(key_file, header, in, out);
 }
 
 // Decrypt contents of stdin and write to stdout
@@ -898,26 +934,25 @@ int smudge (int argc, const char** argv)
 		std::clog << "Usage: git-crypt smudge [--key-name=NAME] [--key-file=PATH]" << std::endl;
 		return 2;
 	}
-	Key_file		key_file;
-	load_key(key_file, key_name, key_path, legacy_key_path);
 
-	// Read the header to get the nonce and make sure it's actually encrypted
-	unsigned char		header[10 + Aes_ctr_decryptor::NONCE_LEN];
-	std::cin.read(reinterpret_cast<char*>(header), sizeof(header));
-	if (std::cin.gcount() != sizeof(header) || std::memcmp(header, "\0GITCRYPT\0", 10) != 0) {
-		// File not encrypted - just copy it out to stdout
-		std::clog << "git-crypt: Warning: file not encrypted" << std::endl;
+	bool encrypted;
+	int retval = decrypt_stream(std::cin, std::cout, key_name, key_path, legacy_key_path, &encrypted);
+	if (!encrypted) {
+		// File not encrypted
+		std::clog << "git-crypt: Warning: file in cache/repo not encrypted" << std::endl;
 		std::clog << "git-crypt: Run 'git-crypt status' to make sure all files are properly encrypted." << std::endl;
 		std::clog << "git-crypt: If 'git-crypt status' reports no problems, then an older version of" << std::endl;
 		std::clog << "git-crypt: this file may be unencrypted in the repository's history.  If this" << std::endl;
 		std::clog << "git-crypt: file contains sensitive information, you can use 'git filter-branch'" << std::endl;
 		std::clog << "git-crypt: to remove its old versions from the history." << std::endl;
-		std::cout.write(reinterpret_cast<char*>(header), std::cin.gcount()); // include the bytes which we already read
-		std::cout << std::cin.rdbuf();
-		return 0;
 	}
+	return retval;
+}
 
-	return decrypt_file_to_stdout(key_file, header, std::cin);
+static inline int copy_stream(std::istream &in, std::ostream &out)
+{
+	out << in.rdbuf();
+	return 0;
 }
 
 int textconv (int argc, const char** argv)
@@ -946,23 +981,7 @@ int textconv (int argc, const char** argv)
 		return 1;
 	}
 	in.exceptions(std::fstream::badbit);
-/*
-	Key_file		key_file;
-	load_key(key_file, key_name, key_path, legacy_key_path);
 
-	// Read the header to get the nonce and determine if it's actually encrypted
-	unsigned char		header[10 + Aes_ctr_decryptor::NONCE_LEN];
-	in.read(reinterpret_cast<char*>(header), sizeof(header));
-	if (in.gcount() != sizeof(header) || std::memcmp(header, "\0GITCRYPT\0", 10) != 0) {
-		// File not encrypted - just copy it out to stdout
-		std::cout.write(reinterpret_cast<char*>(header), in.gcount()); // include the bytes which we already read
-		std::cout << in.rdbuf();
-		return 0;
-	}
-
-	// Go ahead and decrypt it
-	return decrypt_file_to_stdout(key_file, header, in);
-*/
 	// Should not perform decrypt when doing "textconv", because "smudge"
 	// which performs decrypt will always be done prior to "textconv".
 	//
@@ -1015,8 +1034,8 @@ int textconv (int argc, const char** argv)
 	//      > "clean")
 	//    This can be done either by output the encrypted file whithout
 	//    change silently, or exit with error immediately.
-	std::cout << in.rdbuf();
-	return 0;
+	return copy_stream(in, std::cout);
+	//return decrypt_stream(in, std::cout, key_name, key_path, legacy_key_path);
 }
 
 void help_init (std::ostream& out)
