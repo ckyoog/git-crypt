@@ -210,7 +210,7 @@ static bool git_checkout (const std::vector<std::string>& paths)
 	return true;
 }
 
-static bool same_key_name (const char* a, const char* b)
+static inline bool same_key_name (const char* a, const char* b)
 {
 	return (!a && !b) || (a && b && std::strcmp(a, b) == 0);
 }
@@ -244,14 +244,9 @@ static std::string get_internal_state_path ()
 	return path;
 }
 
-static std::string get_internal_keys_path (const std::string& internal_state_path)
-{
-	return internal_state_path + "/keys";
-}
-
 static std::string get_internal_keys_path ()
 {
-	return get_internal_keys_path(get_internal_state_path());
+	return get_internal_state_path() + "/keys";
 }
 
 static std::string get_internal_key_path (const char* key_name)
@@ -322,14 +317,9 @@ static std::string get_repo_state_path ()
 	return path;
 }
 
-static std::string get_repo_keys_path (const std::string& repo_state_path)
-{
-	return repo_state_path + "/keys";
-}
-
 static std::string get_repo_keys_path ()
 {
-	return get_repo_keys_path(get_repo_state_path());
+	return get_repo_state_path() + "/keys";
 }
 
 static bool check_if_key_exists_in_repo (const char *key_name)
@@ -1352,7 +1342,7 @@ int add_gpg_user (int argc, const char** argv)
 	const std::string		state_path(get_repo_state_path());
 	std::vector<std::string>	new_files;
 
-	encrypt_repo_key(key_name, *key, collab_keys, get_repo_keys_path(state_path), &new_files);
+	encrypt_repo_key(key_name, *key, collab_keys, get_repo_keys_path(), &new_files);
 
 	// Add a .gitatributes file to the repo state directory to prevent files in it from being encrypted.
 	const std::string		state_gitattributes_path(state_path + "/.gitattributes");
