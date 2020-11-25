@@ -1186,38 +1186,22 @@ int unlock (int argc, const char** argv)
 void help_lock (std::ostream& out)
 {
 	//     |--------------------------------------------------------------------------------| 80 chars
-	out << "Usage: git-crypt lock [OPTIONS]" << std::endl;
+	out << "Usage: git-crypt lock [OPTIONS] [KEYNAME ...]" << std::endl;
 	out << std::endl;
-	out << "    -a, --all                Lock all keys, instead of just the default" << std::endl;
-	out << "    -k, --key-name KEYNAME   Lock the given key, instead of the default" << std::endl;
 	out << "    -f, --force              Lock even if unclean (you may lose uncommited work)" << std::endl;
 	out << std::endl;
 }
 int lock (int argc, const char** argv)
 {
-	const char*	key_name = 0;
-	bool		all_keys = false;
 	bool		force = false;
 	Options_list	options;
-	options.push_back(Option_def("-k", &key_name));
-	options.push_back(Option_def("--key-name", &key_name));
-	options.push_back(Option_def("-a", &all_keys));
-	options.push_back(Option_def("--all", &all_keys));
 	options.push_back(Option_def("-f", &force));
 	options.push_back(Option_def("--force", &force));
 
 	int			argi = parse_options(options, argc, argv);
 
-	if (argc - argi != 0) {
-		std::clog << "Error: git-crypt lock takes no arguments" << std::endl;
-		help_lock(std::clog);
-		return 2;
-	}
-
-	if (all_keys && key_name) {
-		std::clog << "Error: -k and --all options are mutually exclusive" << std::endl;
-		return 2;
-	}
+	const char *	key_name = 0;
+	bool		all_keys = (argc - argi == 0);
 
 	// 1. Make sure working directory is clean (ignoring untracked files)
 	// We do this because we check out files later, and we don't want the
@@ -1249,10 +1233,13 @@ int lock (int argc, const char** argv)
 		}
 	} else {
 		// just handle the given key
-		std::string	internal_key_path(get_internal_key_path(key_name));
-		remove_file(internal_key_path);
-		deconfigure_git_filters(key_name);
-		get_encrypted_files(encrypted_files, key_name);
+		for (int i = argi; i < argc; ++i) {
+			key_name = std::string(argv[i]) == "default" ? 0 : argv[i];
+			std::string	internal_key_path(get_internal_key_path(key_name));
+			remove_file(internal_key_path);
+			deconfigure_git_filters(key_name);
+			get_encrypted_files(encrypted_files, key_name);
+		}
 	}
 
 	// 3. Check out the files that are currently decrypted but should be encrypted.
