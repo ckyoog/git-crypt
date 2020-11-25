@@ -188,6 +188,9 @@ static void deconfigure_git_filters (const char* key_name)
 
 static bool git_checkout (const std::vector<std::string>& paths)
 {
+	if (paths.empty())
+		return true;
+
 	std::vector<std::string>	command;
 
 	command.push_back("git");
@@ -195,6 +198,8 @@ static bool git_checkout (const std::vector<std::string>& paths)
 	command.push_back("--");
 
 	for (std::vector<std::string>::const_iterator path(paths.begin()); path != paths.end(); ++path) {
+		// Git won't check out a file if its mtime hasn't changed, so touch every file first.
+		touch_file(*path);
 		command.push_back(*path);
 	}
 
@@ -1205,10 +1210,6 @@ int unlock (int argc, const char** argv)
 	}
 
 	// 5. Check out the files that are currently encrypted.
-	// Git won't check out a file if its mtime hasn't changed, so touch every file first.
-	for (std::vector<std::string>::const_iterator file(encrypted_files.begin()); file != encrypted_files.end(); ++file) {
-		touch_file(*file);
-	}
 	if (!git_checkout(encrypted_files)) {
 		std::clog << "Error: 'git checkout' failed" << std::endl;
 		std::clog << "git-crypt has been set up but existing encrypted files have not been decrypted" << std::endl;
@@ -1283,10 +1284,6 @@ int lock (int argc, const char** argv)
 	}
 
 	// 4. Check out the files that are currently decrypted but should be encrypted.
-	// Git won't check out a file if its mtime hasn't changed, so touch every file first.
-	for (std::vector<std::string>::const_iterator file(encrypted_files.begin()); file != encrypted_files.end(); ++file) {
-		touch_file(*file);
-	}
 	if (!git_checkout(encrypted_files)) {
 		std::clog << "Error: 'git checkout' failed" << std::endl;
 		std::clog << "git-crypt has been locked but up but existing decrypted files have not been encrypted" << std::endl;
