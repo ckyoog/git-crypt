@@ -366,14 +366,20 @@ static std::string get_path_to_top ()
 	return path_to_top;
 }
 
-static void get_git_status (std::ostream& output)
+// When the second parameter "files" is NULL, the status of all files will be output
+static void get_git_status (std::ostream& output, std::vector<std::string> *files=NULL)
 {
+	if (files && files->empty())
+		return;
+
 	// git status -uno --porcelain
 	std::vector<std::string>	command;
 	command.push_back("git");
 	command.push_back("status");
 	command.push_back("-uno"); // don't show untracked files
 	command.push_back("--porcelain");
+	if (files)
+		command.insert(command.end(), files->begin(), files->end());
 
 	if (!successful_exit(exec_command(command, output))) {
 		throw Error("'git status' failed - is this a Git repository?");
@@ -1094,13 +1100,6 @@ void help_unlock (std::ostream& out)
 }
 int unlock (int argc, const char** argv)
 {
-	// 1. Make sure working directory is clean (ignoring untracked files)
-	// We do this because we check out files later, and we don't want the
-	// user to lose any changes.  (TODO: only care if encrypted files are
-	// modified, since we only check out encrypted files)
-
-	// Running 'git status' also serves as a check that the Git repo is accessible.
-
 	bool		force = false;
 	bool		args_is_key_files = false;
 	Options_list	options;
@@ -1110,15 +1109,7 @@ int unlock (int argc, const char** argv)
 
 	int		argi = parse_options(options, argc, argv);
 
-	std::stringstream	status_output;
-	get_git_status(status_output);
-	if (!force && status_output.peek() != -1) {
-		std::clog << "Error: Working directory not clean." << std::endl;
-		std::clog << "Please commit your changes or 'git stash' them before running 'git-crypt unlock'." << std::endl;
-		return 1;
-	}
-
-	// 2. Load the key(s)
+	// 1. Load the key(s)
 	std::vector<Key_file>	key_files;
 	std::string			repo_keys_path(get_repo_keys_path());
 	std::vector<std::string>	gpg_secret_keys(gpg_list_secret_keys());
@@ -1179,9 +1170,28 @@ int unlock (int argc, const char** argv)
 		}
 	}
 
-
-	// 3. Install the key(s) and configure the git filters
+	// 2. Find all encrypted files based on the available key names
 	std::vector<std::string>	encrypted_files;
+	for (std::vector<Key_file>::iterator key_file(key_files.begin()); key_file != key_files.end(); ++key_file) {
+		get_encrypted_files(encrypted_files, key_file->get_key_name());
+	}
+
+	// 3. Make sure working directory is clean (ignoring untracked files)
+	// We do this because we check out files later, and we don't want the
+	// user to lose any changes.
+
+	// Running 'git status' also serves as a check that the Git repo is accessible.
+
+	std::stringstream	status_output;
+	get_git_status(status_output, &encrypted_files);
+	if (!force && status_output.peek() != -1) {
+		std::clog << "Error: Working directory not clean." << std::endl;
+		std::clog << "Please commit your changes or 'git stash' them before running 'git-crypt unlock'." << std::endl;
+		std::clog << "Or, use 'git-crypt unlock --force' and possibly lose uncommitted changes." << std::endl;
+		return 1;
+	}
+
+	// 4. Install the key(s) and configure the git filters
 	for (std::vector<Key_file>::iterator key_file(key_files.begin()); key_file != key_files.end(); ++key_file) {
 		std::string		internal_key_path(get_internal_key_path(key_file->get_key_name()));
 		// TODO: croak if internal_key_path already exists???
@@ -1192,10 +1202,9 @@ int unlock (int argc, const char** argv)
 		}
 
 		configure_git_filters(key_file->get_key_name());
-		get_encrypted_files(encrypted_files, key_file->get_key_name());
 	}
 
-	// 4. Check out the files that are currently encrypted.
+	// 5. Check out the files that are currently encrypted.
 	// Git won't check out a file if its mtime hasn't changed, so touch every file first.
 	for (std::vector<std::string>::const_iterator file(encrypted_files.begin()); file != encrypted_files.end(); ++file) {
 		touch_file(*file);
@@ -1229,15 +1238,36 @@ int lock (int argc, const char** argv)
 	const char *	key_name = 0;
 	bool		all_keys = (argc - argi == 0);
 
-	// 1. Make sure working directory is clean (ignoring untracked files)
+	// 1. Find all unlocked keys and all files that need to be encrypted based on the key names
+	// in worktree.
+	std::vector<std::string>	key_names;
+	std::vector<std::string>	encrypted_files;
+	if (all_keys) {
+		// handle all keys
+		std::vector<std::string> dirents = get_directory_contents(get_internal_keys_path().c_str());
+
+		for (std::vector<std::string>::const_iterator dirent(dirents.begin()); dirent != dirents.end(); ++dirent) {
+			key_names.push_back(*dirent);
+			key_name = *dirent == "default" ? 0 : dirent->c_str();
+			get_encrypted_files(encrypted_files, key_name);
+		}
+	} else {
+		// just handle the given key
+		for (int i = argi; i < argc; ++i) {
+			key_names.push_back(std::string(argv[i]));
+			key_name = std::string(argv[i]) == "default" ? 0 : argv[i];
+			get_encrypted_files(encrypted_files, key_name);
+		}
+	}
+
+	// 2. Make sure working directory is clean (ignoring untracked files)
 	// We do this because we check out files later, and we don't want the
-	// user to lose any changes.  (TODO: only care if encrypted files are
-	// modified, since we only check out encrypted files)
+	// user to lose any changes.
 
 	// Running 'git status' also serves as a check that the Git repo is accessible.
 
 	std::stringstream	status_output;
-	get_git_status(status_output);
+	get_git_status(status_output, &encrypted_files);
 	if (!force && status_output.peek() != -1) {
 		std::clog << "Error: Working directory not clean." << std::endl;
 		std::clog << "Please commit your changes or 'git stash' them before running 'git-crypt lock'." << std::endl;
@@ -1245,30 +1275,14 @@ int lock (int argc, const char** argv)
 		return 1;
 	}
 
-	// 2. deconfigure the git filters and remove decrypted keys
-	std::vector<std::string>	encrypted_files;
-	if (all_keys) {
-		// deconfigure for all keys
-		std::vector<std::string> dirents = get_directory_contents(get_internal_keys_path().c_str());
-
-		for (std::vector<std::string>::const_iterator dirent(dirents.begin()); dirent != dirents.end(); ++dirent) {
-			const char* this_key_name = (*dirent == "default" ? 0 : dirent->c_str());
-			remove_file(get_internal_key_path(this_key_name));
-			deconfigure_git_filters(this_key_name);
-			get_encrypted_files(encrypted_files, this_key_name);
-		}
-	} else {
-		// just handle the given key
-		for (int i = argi; i < argc; ++i) {
-			key_name = std::string(argv[i]) == "default" ? 0 : argv[i];
-			std::string	internal_key_path(get_internal_key_path(key_name));
-			remove_file(internal_key_path);
-			deconfigure_git_filters(key_name);
-			get_encrypted_files(encrypted_files, key_name);
-		}
+	// 3. deconfigure the git filters and remove decrypted keys
+	for (std::vector<std::string>::const_iterator key_name(key_names.begin()); key_name != key_names.end(); ++key_name) {
+		const char* this_key_name = *key_name == "default" ? 0 : key_name->c_str();
+		remove_file(get_internal_key_path(this_key_name));
+		deconfigure_git_filters(this_key_name);
 	}
 
-	// 3. Check out the files that are currently decrypted but should be encrypted.
+	// 4. Check out the files that are currently decrypted but should be encrypted.
 	// Git won't check out a file if its mtime hasn't changed, so touch every file first.
 	for (std::vector<std::string>::const_iterator file(encrypted_files.begin()); file != encrypted_files.end(); ++file) {
 		touch_file(*file);
