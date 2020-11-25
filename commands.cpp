@@ -1086,8 +1086,11 @@ int init (int argc, const char** argv)
 void help_unlock (std::ostream& out)
 {
 	//     |--------------------------------------------------------------------------------| 80 chars
-	out << "Usage: git-crypt unlock" << std::endl;
-	out << "   or: git-crypt unlock KEY_FILE ..." << std::endl;
+	out << "Usage: git-crypt unlock [OPTIONS] [KEYNAME ...]" << std::endl;
+	out << "   or: git-crypt unlock [OPTIONS] --key-files KEY_FILE ..." << std::endl;
+	out << std::endl;
+	out << "    -f, --force              Unlock even if unclean (you may lose uncommited work)" << std::endl;
+	out << std::endl;
 }
 int unlock (int argc, const char** argv)
 {
@@ -1098,12 +1101,18 @@ int unlock (int argc, const char** argv)
 
 	// Running 'git status' also serves as a check that the Git repo is accessible.
 
+	bool		force = false;
+	bool		args_is_key_files = false;
 	Options_list	options;
+	options.push_back(Option_def("--key-files", &args_is_key_files));
+	options.push_back(Option_def("-f", &force));
+	options.push_back(Option_def("--force", &force));
+
 	int		argi = parse_options(options, argc, argv);
 
 	std::stringstream	status_output;
 	get_git_status(status_output);
-	if (status_output.peek() != -1) {
+	if (!force && status_output.peek() != -1) {
 		std::clog << "Error: Working directory not clean." << std::endl;
 		std::clog << "Please commit your changes or 'git stash' them before running 'git-crypt unlock'." << std::endl;
 		return 1;
@@ -1111,9 +1120,14 @@ int unlock (int argc, const char** argv)
 
 	// 2. Load the key(s)
 	std::vector<Key_file>	key_files;
-	if (argc - argi > 0) {
+	std::string			repo_keys_path(get_repo_keys_path());
+	std::vector<std::string>	gpg_secret_keys(gpg_list_secret_keys());
+	if (args_is_key_files) {
+		if (argc - argi == 0) {
+			std::clog << "Error: no key file specified" << std::endl;
+			return 1;
+		}
 		// Read from the symmetric key file(s)
-
 		for (int i = argi; i < argc; ++i) {
 			const char*	symmetric_key_file = argv[i];
 			Key_file	key_file;
@@ -1140,13 +1154,22 @@ int unlock (int argc, const char** argv)
 
 			key_files.push_back(key_file);
 		}
+	} else if (argc - argi > 0) {
+		for (int i = argi; i < argc; ++i) {
+		// TODO: don't hard code key version 0 here - instead, determine the most recent version and try to decrypt that, or decrypt all versions if command-line option specified
+			const char*	key_name = std::string(argv[i]) == "default" ? 0 : argv[i];
+			Key_file	key_file;
+			if (decrypt_repo_key(key_file, key_name, 0, gpg_secret_keys, repo_keys_path))
+				key_files.push_back(key_file);
+			else
+				std::clog << "Warning: no GPG secret key available to unlock key " << key_name << std::endl;
+		}
+		if (key_files.empty())
+			return 1;
 	} else {
 		// Decrypt GPG key from root of repo
-		std::string			repo_keys_path(get_repo_keys_path());
-		std::vector<std::string>	gpg_secret_keys(gpg_list_secret_keys());
 		// TODO: command-line option to specify the precise secret key to use
 		// TODO: don't hard code key version 0 here - instead, determine the most recent version and try to decrypt that, or decrypt all versions if command-line option specified
-		// TODO: command line option to only unlock specific key instead of all of them
 		// TODO: avoid decrypting repo keys which are already unlocked in the .git directory
 		if (!decrypt_repo_keys(key_files, 0, gpg_secret_keys, repo_keys_path)) {
 			std::clog << "Error: no GPG secret key available to unlock this repository." << std::endl;
