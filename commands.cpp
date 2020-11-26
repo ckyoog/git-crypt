@@ -725,7 +725,7 @@ static int encrypt_stream (std::istream &in, std::ostream &out,
 	bool not_encrypted = in.gcount() != header_size || std::memcmp(buffer, "\0GITCRYPT\0", 10) != 0;
 	if (!not_encrypted) {
 		// File already encrypted - Just output file as-is
-		std::clog << "git-crypt: Error: file in worktree not decrypted" << std::endl;
+		std::clog << "git-crypt: Warning: file in worktree not decrypted" << std::endl;
 		out.write(reinterpret_cast<char*>(buffer), in.gcount()); // include the bytes which we already read
 		out << in.rdbuf();
 		return 1;
@@ -852,7 +852,13 @@ int clean (int argc, const char** argv)
 
 	int retval;
 	if ((retval = encrypt_stream(std::cin, std::cout, key_name, key_path, legacy_key_path))) {
-		std::clog << "git-crypt: Error: failed to encrypt file" << std::endl << std::endl;
+		std::string log_kind = "Error";
+		if (retval == 1) { // File not decrypted
+			// Exit with no error, output file as-is as no filter enforced
+			log_kind = "Warning";
+			retval = 0;
+		}
+		std::clog << "git-crypt: " << log_kind << ": failed to encrypt file" << std::endl << std::endl;
 	}
 	return !!retval;	// only 1 or 0 returned
 }
