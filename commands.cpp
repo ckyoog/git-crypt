@@ -715,8 +715,7 @@ static int parse_plumbing_options (const char** key_name, const char** key_file,
 }
 
 static int encrypt_stream (std::istream &in, std::ostream &out,
-		const char *key_name, const char *key_path, const char *legacy_key_path,
-		bool *encrypted=NULL)
+		const char *key_name, const char *key_path, const char *legacy_key_path)
 {
 	char			buffer[1024];
 
@@ -724,13 +723,12 @@ static int encrypt_stream (std::istream &in, std::ostream &out,
 	int header_size = 10 + Aes_ctr_decryptor::NONCE_LEN;
 	in.read(buffer, header_size);
 	bool not_encrypted = in.gcount() != header_size || std::memcmp(buffer, "\0GITCRYPT\0", 10) != 0;
-	if (encrypted)
-		*encrypted = !not_encrypted;
 	if (!not_encrypted) {
-		// File already encrypted - just copy it out to stdout
+		// File already encrypted - Just output file as-is
+		std::clog << "git-crypt: Error: file in worktree not decrypted" << std::endl;
 		out.write(reinterpret_cast<char*>(buffer), in.gcount()); // include the bytes which we already read
 		out << in.rdbuf();
-		return 0;
+		return 1;
 	}
 
 	// Load the key
@@ -740,7 +738,7 @@ static int encrypt_stream (std::istream &in, std::ostream &out,
 	const Key_file::Entry*	key = key_file.get_latest();
 	if (!key) {
 		std::clog << "git-crypt: error: key is empty" << std::endl;
-		return 1;
+		return 2;
 	}
 
 	// Read the rest of the input to encrypt
@@ -771,7 +769,7 @@ static int encrypt_stream (std::istream &in, std::ostream &out,
 	// Make sure the file isn't so large we'll overflow the counter value (which would doom security)
 	if (file_size >= Aes_ctr_encryptor::MAX_CRYPT_BYTES) {
 		std::clog << "git-crypt: error: file too long to encrypt securely" << std::endl;
-		return 1;
+		return 3;
 	}
 
 	// We use an HMAC of the file as the encryption nonce (IV) for CTR mode.
@@ -852,14 +850,11 @@ int clean (int argc, const char** argv)
 		return 2;
 	}
 
-	bool encrypted;
-	int retval = encrypt_stream(std::cin, std::cout, key_name, key_path, legacy_key_path, &encrypted);
-	if (encrypted) {
-		// File already encrypted, return error
-		std::clog << "git-crypt: Error: file in worktree still encrypted" << std::endl;
-		return 1;
+	int retval;
+	if ((retval = encrypt_stream(std::cin, std::cout, key_name, key_path, legacy_key_path))) {
+		std::clog << "git-crypt: Error: failed to encrypt file" << std::endl << std::endl;
 	}
-	return retval;
+	return !!retval;	// only 1 or 0 returned
 }
 
 static int decrypt_stream (const Key_file& key_file, const unsigned char* header,
@@ -871,7 +866,7 @@ static int decrypt_stream (const Key_file& key_file, const unsigned char* header
 	const Key_file::Entry*	key = key_file.get(key_version);
 	if (!key) {
 		std::clog << "git-crypt: error: key version " << key_version << " not available - please unlock with the latest version of the key." << std::endl;
-		return 1;
+		return 2;
 	}
 
 	Aes_ctr_decryptor	aes(key->aes_key, nonce);
@@ -891,15 +886,14 @@ static int decrypt_stream (const Key_file& key_file, const unsigned char* header
 		// Although we've already written the tampered file to stdout, exiting
 		// with a non-zero status will tell git the file has not been filtered,
 		// so git will not replace it.
-		return 1;
+		return 3;
 	}
 
 	return 0;
 }
 
 static int decrypt_stream (std::istream &in, std::ostream &out,
-		const char *key_name, const char *key_path, const char *legacy_key_path,
-		bool *encrypted=NULL)
+		const char *key_name, const char *key_path, const char *legacy_key_path)
 {
 	Key_file		key_file;
 	load_key(key_file, key_name, key_path, legacy_key_path);
@@ -908,13 +902,18 @@ static int decrypt_stream (std::istream &in, std::ostream &out,
 	unsigned char		header[10 + Aes_ctr_decryptor::NONCE_LEN];
 	in.read(reinterpret_cast<char*>(header), sizeof(header));
 	bool not_encrypted = in.gcount() != sizeof(header) || std::memcmp(header, "\0GITCRYPT\0", 10) != 0;
-	if (encrypted)
-		*encrypted = !not_encrypted;
 	if (not_encrypted) {
-		// File not encrypted - just copy it out to out
+		// File not encrypted - just output file as-is
+		std::clog << "git-crypt: Warning: file in cache/repo not encrypted" << std::endl;
+		std::clog << "git-crypt: Run 'git-crypt status' to make sure all files are properly encrypted." << std::endl;
+		std::clog << "git-crypt: If 'git-crypt status' reports no problems, then an older version of" << std::endl;
+		std::clog << "git-crypt: this file may be unencrypted in the repository's history.  If this" << std::endl;
+		std::clog << "git-crypt: file contains sensitive information, you can use 'git filter-branch'" << std::endl;
+		std::clog << "git-crypt: to remove its old versions from the history." << std::endl;
+
 		out.write(reinterpret_cast<char*>(header), in.gcount()); // include the bytes which we already read
 		out << in.rdbuf();
-		return 0;
+		return 1;
 	}
 	return decrypt_stream(key_file, header, in, out);
 }
@@ -935,18 +934,17 @@ int smudge (int argc, const char** argv)
 		return 2;
 	}
 
-	bool encrypted;
-	int retval = decrypt_stream(std::cin, std::cout, key_name, key_path, legacy_key_path, &encrypted);
-	if (!encrypted) {
-		// File not encrypted
-		std::clog << "git-crypt: Warning: file in cache/repo not encrypted" << std::endl;
-		std::clog << "git-crypt: Run 'git-crypt status' to make sure all files are properly encrypted." << std::endl;
-		std::clog << "git-crypt: If 'git-crypt status' reports no problems, then an older version of" << std::endl;
-		std::clog << "git-crypt: this file may be unencrypted in the repository's history.  If this" << std::endl;
-		std::clog << "git-crypt: file contains sensitive information, you can use 'git filter-branch'" << std::endl;
-		std::clog << "git-crypt: to remove its old versions from the history." << std::endl;
+	int retval;
+	if ((retval = decrypt_stream(std::cin, std::cout, key_name, key_path, legacy_key_path))) {
+		std::string log_kind = "Error";
+		if (retval == 1) { // File not encrypted
+			// Exit with no error, output file as-is as no filter enforced
+			log_kind = "Warning";
+			retval = 0;
+		}
+		std::clog << "git-crypt: " << log_kind << ": failed to decrypt file" << std::endl << std::endl;
 	}
-	return retval;
+	return !!retval;	// only 1 or 0 returned
 }
 
 static inline int copy_stream(std::istream &in, std::ostream &out)
