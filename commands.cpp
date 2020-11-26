@@ -157,15 +157,15 @@ static void configure_git_filters (const char* key_name)
 	if (key_name) {
 		// Note: key_name contains only shell-safe characters so it need not be escaped.
 		git_config(std::string("filter.git-crypt-") + key_name + ".smudge",
-		           escaped_git_crypt_path + " smudge --key-name=" + key_name);
+		           escaped_git_crypt_path + " smudge --name=%f --key-name=" + key_name);
 		git_config(std::string("filter.git-crypt-") + key_name + ".clean",
-		           escaped_git_crypt_path + " clean --key-name=" + key_name);
+		           escaped_git_crypt_path + " clean --name=%f --key-name=" + key_name);
 		git_config(std::string("filter.git-crypt-") + key_name + ".required", "true");
 		git_config(std::string("diff.git-crypt-") + key_name + ".textconv",
 		           escaped_git_crypt_path + " textconv --key-name=" + key_name);
 	} else {
-		git_config("filter.git-crypt.smudge", escaped_git_crypt_path + " smudge");
-		git_config("filter.git-crypt.clean", escaped_git_crypt_path + " clean");
+		git_config("filter.git-crypt.smudge", escaped_git_crypt_path + " smudge --name=%f");
+		git_config("filter.git-crypt.clean", escaped_git_crypt_path + " clean --name=%f");
 		git_config("filter.git-crypt.required", "true");
 		git_config("diff.git-crypt.textconv", escaped_git_crypt_path + " textconv");
 	}
@@ -704,12 +704,20 @@ static void encrypt_repo_key (const char* key_name, const Key_file::Entry& key, 
 	}
 }
 
-static int parse_plumbing_options (const char** key_name, const char** key_file, int argc, const char** argv)
+static int parse_plumbing_options (
+		const char **key_name,
+		const char **key_file,
+		const char **stdin_name,
+		int argc, const char** argv)
 {
 	Options_list	options;
 	options.push_back(Option_def("-k", key_name));
 	options.push_back(Option_def("--key-name", key_name));
 	options.push_back(Option_def("--key-file", key_file));
+	if (stdin_name) {
+		options.push_back(Option_def("--n", stdin_name));
+		options.push_back(Option_def("--name", stdin_name));
+	}
 
 	return parse_options(options, argc, argv);
 }
@@ -837,16 +845,19 @@ static int encrypt_stream (std::istream &in, std::ostream &out,
 // Encrypt contents of stdin and write to stdout
 int clean (int argc, const char** argv)
 {
-	const char*		key_name = 0;
-	const char*		key_path = 0;
-	const char*		legacy_key_path = 0;
+	const char		*key_name = 0;
+	const char		*key_path = 0;
+	const char		*stdin_name = 0;
+	const char		*legacy_key_path = 0;
 
-	int			argi = parse_plumbing_options(&key_name, &key_path, argc, argv);
+	int			argi = parse_plumbing_options(&key_name, &key_path, &stdin_name, argc, argv);
 	if (argc - argi == 0) {
-	} else if (!key_name && !key_path && argc - argi == 1) { // Deprecated - for compatibility with pre-0.4
+		if (!stdin_name && getenv("GIT_PREFIX"))
+			prompt_config_update_needed();
+	} else if (!key_name && !key_path && !stdin_name && argc - argi == 1) { // Deprecated - for compatibility with pre-0.4
 		legacy_key_path = argv[argi];
 	} else {
-		std::clog << "Usage: git-crypt clean [--key-name=NAME] [--key-file=PATH]" << std::endl;
+		std::clog << "Usage: git-crypt clean [--name=NAME] [--key-name=NAME] [--key-file=PATH]" << std::endl;
 		return 2;
 	}
 
@@ -858,7 +869,7 @@ int clean (int argc, const char** argv)
 			log_kind = "Warning";
 			retval = 0;
 		}
-		std::clog << "git-crypt: " << log_kind << ": failed to encrypt file" << std::endl << std::endl;
+		std::clog << "git-crypt: " << log_kind << ": failed to encrypt file" << (stdin_name ? std::string(" ") + stdin_name : "") << std::endl << std::endl;
 	}
 	return !!retval;	// only 1 or 0 returned
 }
@@ -927,16 +938,19 @@ static int decrypt_stream (std::istream &in, std::ostream &out,
 // Decrypt contents of stdin and write to stdout
 int smudge (int argc, const char** argv)
 {
-	const char*		key_name = 0;
-	const char*		key_path = 0;
-	const char*		legacy_key_path = 0;
+	const char		*key_name = 0;
+	const char		*key_path = 0;
+	const char		*stdin_name = 0;
+	const char		*legacy_key_path = 0;
 
-	int			argi = parse_plumbing_options(&key_name, &key_path, argc, argv);
+	int			argi = parse_plumbing_options(&key_name, &key_path, &stdin_name, argc, argv);
 	if (argc - argi == 0) {
-	} else if (!key_name && !key_path && argc - argi == 1) { // Deprecated - for compatibility with pre-0.4
+		if (!stdin_name && getenv("GIT_PREFIX"))
+			prompt_config_update_needed();
+	} else if (!key_name && !key_path && !stdin_name && argc - argi == 1) { // Deprecated - for compatibility with pre-0.4
 		legacy_key_path = argv[argi];
 	} else {
-		std::clog << "Usage: git-crypt smudge [--key-name=NAME] [--key-file=PATH]" << std::endl;
+		std::clog << "Usage: git-crypt smudge [--name=NAME] [--key-name=NAME] [--key-file=PATH]" << std::endl;
 		return 2;
 	}
 
@@ -948,7 +962,7 @@ int smudge (int argc, const char** argv)
 			log_kind = "Warning";
 			retval = 0;
 		}
-		std::clog << "git-crypt: " << log_kind << ": failed to decrypt file" << std::endl << std::endl;
+		std::clog << "git-crypt: " << log_kind << ": failed to decrypt file" << (stdin_name ? std::string(" ") + stdin_name : "") << std::endl << std::endl;
 	}
 	return !!retval;	// only 1 or 0 returned
 }
@@ -967,7 +981,7 @@ int textconv (int argc, const char** argv)
 	//const char*		legacy_key_path __attribute__((unused)) = 0;
 	const char*		legacy_key_path = 0;	(void)legacy_key_path;
 
-	int			argi = parse_plumbing_options(&key_name, &key_path, argc, argv);
+	int			argi = parse_plumbing_options(&key_name, &key_path, NULL, argc, argv);
 	if (argc - argi == 1) {
 		filename = argv[argi];
 	} else if (!key_name && !key_path && argc - argi == 2) { // Deprecated - for compatibility with pre-0.4

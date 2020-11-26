@@ -33,12 +33,18 @@
 
 #include <string>
 #include <iosfwd>
+#include <iostream>
 
 struct Error {
 	std::string	message;
 
 	explicit Error (std::string m) : message(m) { }
 };
+
+static inline void prompt_config_update_needed()
+{
+	std::clog << "git-crypt: looks like your git-crypt config is old, please unlock the repo again to update the git-crypt config" << std::endl;
+}
 
 // Plumbing commands:
 int clean (int argc, const char** argv);

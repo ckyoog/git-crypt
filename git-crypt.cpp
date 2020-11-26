@@ -229,6 +229,8 @@ try {
 			return smudge(argc, argv);
 		}
 		if (std::strcmp(command, "diff") == 0) {	// keep "diff" for back compatibility
+			prompt_config_update_needed();
+			std::clog << "git-crypt: use 'textconv' instead if you are running 'diff' manually" << std::endl;
 			return textconv(argc, argv);
 		}
 		if (std::strcmp(command, "textconv") == 0) {
