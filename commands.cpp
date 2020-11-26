@@ -745,7 +745,10 @@ static int encrypt_stream (std::istream &in, std::ostream &out,
 
 	const Key_file::Entry*	key = key_file.get_latest();
 	if (!key) {
-		std::clog << "git-crypt: error: key is empty" << std::endl;
+		std::clog << "git-crypt: Warning: key is empty" << std::endl;
+		// Just output file as-is
+		out.write(reinterpret_cast<char*>(buffer), in.gcount()); // include the bytes which we already read
+		out << in.rdbuf();
 		return 2;
 	}
 
@@ -776,7 +779,14 @@ static int encrypt_stream (std::istream &in, std::ostream &out,
 
 	// Make sure the file isn't so large we'll overflow the counter value (which would doom security)
 	if (file_size >= Aes_ctr_encryptor::MAX_CRYPT_BYTES) {
-		std::clog << "git-crypt: error: file too long to encrypt securely" << std::endl;
+		std::clog << "git-crypt: Warning: file too long to encrypt securely" << std::endl;
+		// Just output file as-is
+		out << file_contents;
+		if (temp_file.is_open()) {
+			temp_file.seekg(0);
+			out << temp_file.rdbuf();
+		}
+		out << in.rdbuf();
 		return 3;
 	}
 
@@ -861,50 +871,53 @@ int clean (int argc, const char** argv)
 		return 2;
 	}
 
-	int retval;
-	if ((retval = encrypt_stream(std::cin, std::cout, key_name, key_path, legacy_key_path))) {
-		std::string log_kind = "Error";
-		if (retval == 1) { // File not decrypted
-			// Exit with no error, output file as-is as no filter enforced
-			log_kind = "Warning";
-			retval = 0;
-		}
-		std::clog << "git-crypt: " << log_kind << ": failed to encrypt file" << (stdin_name ? std::string(" ") + stdin_name : "") << std::endl << std::endl;
+	if (encrypt_stream(std::cin, std::cout, key_name, key_path, legacy_key_path)) {
+		std::clog << "git-crypt: Warning: failed to encrypt file" << (stdin_name ? std::string(" ") + stdin_name : "") << std::endl << std::endl;
+		// Always return 0 and output file as-is if fail to encrypt, as if no filter is enforced.
+		//return 1;
 	}
-	return !!retval;	// only 1 or 0 returned
+	return 0;
 }
 
 static int decrypt_stream (const Key_file& key_file, const unsigned char* header,
-		std::istream& in, std::ostream &out)
+		std::istream &in, std::ostream &out)
 {
 	const unsigned char*	nonce = header + 10;
 	uint32_t		key_version = 0; // TODO: get the version from the file header
 
 	const Key_file::Entry*	key = key_file.get(key_version);
 	if (!key) {
-		std::clog << "git-crypt: error: key version " << key_version << " not available - please unlock with the latest version of the key." << std::endl;
+		std::clog << "git-crypt: Warning: key version " << key_version << " not available - please unlock with the latest version of the key." << std::endl;
+		// Just output file as-is
+		out.write((char *)header, in.gcount());
+		out << in.rdbuf();
 		return 2;
 	}
+
+	std::stringstream	original;
+	std::stringstream	decrypted;
+	original.write((char *)header, in.gcount());
 
 	Aes_ctr_decryptor	aes(key->aes_key, nonce);
 	Hmac_sha1_state		hmac(key->hmac_key, HMAC_KEY_LEN);
 	while (in) {
 		unsigned char	buffer[1024];
 		in.read(reinterpret_cast<char*>(buffer), sizeof(buffer));
+		original.write(reinterpret_cast<char*>(buffer), in.gcount());
 		aes.process(buffer, buffer, in.gcount());
 		hmac.add(buffer, in.gcount());
-		out.write(reinterpret_cast<char*>(buffer), in.gcount());
+		decrypted.write(reinterpret_cast<char*>(buffer), in.gcount());
 	}
 
 	unsigned char		digest[Hmac_sha1_state::LEN];
 	hmac.get(digest);
 	if (!leakless_equals(digest, nonce, Aes_ctr_decryptor::NONCE_LEN)) {
-		std::clog << "git-crypt: error: encrypted file has been tampered with!" << std::endl;
-		// Although we've already written the tampered file to stdout, exiting
-		// with a non-zero status will tell git the file has not been filtered,
-		// so git will not replace it.
+		std::clog << "git-crypt: Warning: encrypted file has been tampered with!" << std::endl;
+		// Just output file as-is
+		out << original.rdbuf();
 		return 3;
-	}
+	} else
+		out << decrypted.rdbuf();
 
 	return 0;
 }
@@ -954,17 +967,12 @@ int smudge (int argc, const char** argv)
 		return 2;
 	}
 
-	int retval;
-	if ((retval = decrypt_stream(std::cin, std::cout, key_name, key_path, legacy_key_path))) {
-		std::string log_kind = "Error";
-		if (retval == 1) { // File not encrypted
-			// Exit with no error, output file as-is as no filter enforced
-			log_kind = "Warning";
-			retval = 0;
-		}
-		std::clog << "git-crypt: " << log_kind << ": failed to decrypt file" << (stdin_name ? std::string(" ") + stdin_name : "") << std::endl << std::endl;
+	if (decrypt_stream(std::cin, std::cout, key_name, key_path, legacy_key_path)) {
+		std::clog << "git-crypt: Warning: failed to decrypt file" << (stdin_name ? std::string(" ") + stdin_name : "") << std::endl << std::endl;
+		// Always return 0 and output file as-is if fail to decrypt, as if no filter is enforced.
+		//return 1;
 	}
-	return !!retval;	// only 1 or 0 returned
+	return 0;
 }
 
 static inline int copy_stream(std::istream &in, std::ostream &out)
