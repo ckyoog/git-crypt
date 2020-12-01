@@ -208,6 +208,13 @@ static bool git_checkout (const std::vector<std::string>& paths)
 		return false;
 	}
 
+	for (std::vector<std::string>::const_iterator path(paths.begin()); path != paths.end(); ++path) {
+		// Touch the files again, so that next "git status" can show
+		// the files whose blobs are not encrypted properly, either
+		// encrypted twice or not encrpted.
+		touch_file(*path);
+	}
+
 	return true;
 }
 
