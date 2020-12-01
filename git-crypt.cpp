@@ -40,7 +40,8 @@
 #include <iostream>
 #include <string.h>
 
-const char*	argv0;
+const char	*argv0;
+const char	*command = 0;
 
 static void print_usage (std::ostream& out)
 {
@@ -176,7 +177,7 @@ try {
 	/*
 	 * Pass off to command handler
 	 */
-	const char*		command = argv[0];
+	command = argv[0];
 	--argc;
 	++argv;
 
@@ -237,7 +238,7 @@ try {
 			return textconv(argc, argv);
 		}
 	} catch (const Option_error& e) {
-		std::clog << "git-crypt: Error: " << e.option_name << ": " << e.message << std::endl;
+		std::clog << "git-crypt " << command <<": Error: " << e.option_name << ": " << e.message << std::endl;
 		help_for_command(command, std::clog);
 		return 2;
 	}
@@ -246,25 +247,25 @@ try {
 	return 2;
 
 } catch (const Error& e) {
-	std::cerr << "git-crypt: Error: " << e.message << std::endl;
+	std::cerr << "git-crypt" << COMMAND << ": Error: " << e.message << std::endl;
 	return 1;
 } catch (const Gpg_error& e) {
-	std::cerr << "git-crypt: GPG error: " << e.message << std::endl;
+	std::cerr << "git-crypt" << COMMAND << ": GPG error: " << e.message << std::endl;
 	return 1;
 } catch (const System_error& e) {
-	std::cerr << "git-crypt: System error: " << e.message() << std::endl;
+	std::cerr << "git-crypt" << COMMAND << ": System error: " << e.message() << std::endl;
 	return 1;
 } catch (const Crypto_error& e) {
-	std::cerr << "git-crypt: Crypto error: " << e.where << ": " << e.message << std::endl;
+	std::cerr << "git-crypt" << COMMAND << ": Crypto error: " << e.where << ": " << e.message << std::endl;
 	return 1;
 } catch (Key_file::Incompatible) {
-	std::cerr << "git-crypt: This repository contains a incompatible key file.  Please upgrade git-crypt." << std::endl;
+	std::cerr << "git-crypt" << COMMAND << ": This repository contains a incompatible key file.  Please upgrade git-crypt." << std::endl;
 	return 1;
 } catch (Key_file::Malformed) {
-	std::cerr << "git-crypt: This repository contains a malformed key file.  It may be corrupted." << std::endl;
+	std::cerr << "git-crypt" << COMMAND << ": This repository contains a malformed key file.  It may be corrupted." << std::endl;
 	return 1;
 } catch (const std::ios_base::failure& e) {
-	std::cerr << "git-crypt: I/O error: " << e.what() << std::endl;
+	std::cerr << "git-crypt" << COMMAND << ": I/O error: " << e.what() << std::endl;
 	return 1;
 }
 

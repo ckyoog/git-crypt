@@ -28,6 +28,7 @@
  * as that of the covered work.
  */
 
+#include "git-crypt.hpp"
 #include "commands.hpp"
 #include "crypto.hpp"
 #include "util.hpp"
@@ -872,7 +873,7 @@ int clean (int argc, const char** argv)
 	}
 
 	if (encrypt_stream(std::cin, std::cout, key_name, key_path, legacy_key_path)) {
-		std::clog << "git-crypt: Warning: failed to encrypt file" << (stdin_name ? std::string(" ") + stdin_name : "") << std::endl << std::endl;
+		std::clog << "git-crypt" << COMMAND << ": Warning: failed to encrypt file" << LW(stdin_name) << std::endl << std::endl;
 		// Always return 0 and output file as-is if fail to encrypt, as if no filter is enforced.
 		//return 1;
 	}
@@ -968,7 +969,7 @@ int smudge (int argc, const char** argv)
 	}
 
 	if (decrypt_stream(std::cin, std::cout, key_name, key_path, legacy_key_path)) {
-		std::clog << "git-crypt: Warning: failed to decrypt file" << (stdin_name ? std::string(" ") + stdin_name : "") << std::endl << std::endl;
+		std::clog << "git-crypt" << COMMAND << ": Warning: failed to decrypt file" << LW(stdin_name) << std::endl << std::endl;
 		// Always return 0 and output file as-is if fail to decrypt, as if no filter is enforced.
 		//return 1;
 	}

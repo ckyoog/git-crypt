@@ -33,6 +33,10 @@
 
 #define VERSION "0.6.0"
 
-extern const char*	argv0;	// initialized in main() to argv[0]
+extern const char *argv0;	// initialized in main() to argv[0]
+extern const char *command;	// initialized in main() to subcommand, otherwise NULL
+
+#define LW(x) ((x) ? std::string(" ") + (x) : "")	// add leading whitespace if string is not NULL
+#define COMMAND LW(command)	// basically used for logging
 
 #endif
